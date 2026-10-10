@@ -1,6 +1,7 @@
 import json
 import time
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
@@ -81,6 +82,27 @@ if not df.empty:
 
     st.subheader("Saari entries")
     st.dataframe(df.drop(columns=["month"]))
+
+    export_df = df.drop(columns=["month"]).copy()
+    export_df["date"] = export_df["date"].dt.strftime("%Y-%m-%d")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button(
+            "📄 CSV download karo",
+            data=export_df.to_csv(index=False).encode("utf-8"),
+            file_name="expenses.csv",
+            mime="text/csv",
+        )
+    with c2:
+        buffer = BytesIO()
+        export_df.to_excel(buffer, index=False, sheet_name="Expenses")
+        st.download_button(
+            "📊 Excel download karo",
+            data=buffer.getvalue(),
+            file_name="expenses.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     st.divider()
     confirm = st.checkbox("Haan, saara data hatana hai")
