@@ -1,0 +1,3 @@
+venv/
+expenses.csv
+__pycache__/
