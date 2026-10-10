@@ -4,16 +4,19 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from google import genai
 
 client = genai.Client()
 FILE = Path("expenses.csv")
 
+
 def load():
     if FILE.exists():
         return pd.read_csv(FILE)
     return pd.DataFrame(columns=["date", "amount", "category", "note"])
+
 
 st.title("💸 AI Expense Tracker")
 text = st.text_input("What did you spend on?", placeholder="e.g. 250 on pizza with friends")
@@ -53,6 +56,34 @@ if st.button("Add") and text.strip():
 
 df = load()
 if not df.empty:
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+    df = df.dropna(subset=["date", "amount"])
+    df["month"] = df["date"].dt.strftime("%Y-%m")
+
     st.metric("Total spent", f"₹{df['amount'].sum():,.0f}")
-    st.bar_chart(df.groupby("category")["amount"].sum())
-    st.dataframe(df)
+
+    months = sorted(df["month"].unique(), reverse=True)
+    chosen = st.selectbox("Month chuno", months)
+    month_df = df[df["month"] == chosen]
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Category-wise kharch")
+        pie_data = month_df.groupby("category", as_index=False)["amount"].sum()
+        st.plotly_chart(px.pie(pie_data, names="category", values="amount", hole=0.4),
+                        use_container_width=True)
+    with col2:
+        st.subheader("Roz ka spending trend")
+        daily = df.groupby("date", as_index=False)["amount"].sum()
+        st.plotly_chart(px.line(daily, x="date", y="amount", markers=True),
+                        use_container_width=True)
+
+    st.subheader("Saari entries")
+    st.dataframe(df.drop(columns=["month"]))
+
+    st.divider()
+    confirm = st.checkbox("Haan, saara data hatana hai")
+    if st.button("Reset all data") and confirm:
+        FILE.unlink(missing_ok=True)
+        st.rerun()
