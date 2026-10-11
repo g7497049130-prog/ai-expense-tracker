@@ -2,7 +2,6 @@ import json
 import time
 from datetime import date
 from io import BytesIO
-from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
@@ -10,17 +9,34 @@ import streamlit as st
 from google import genai
 
 client = genai.Client()
-FILE = Path("expenses.csv")
 MODEL = "gemini-3.8-flash"
+COLUMNS = ["date", "amount", "category", "note"]
 
-
-def load():
-    if FILE.exists():
-        return pd.read_csv(FILE)
-    return pd.DataFrame(columns=["date", "amount", "category", "note"])
-
+# Har user ka data uske session mein
+if "expenses" not in st.session_state:
+    st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+if "chat" not in st.session_state:
+    st.session_state.chat = []
 
 st.title("💸 AI Expense Tracker")
+st.caption("Tumhara data sirf tumhare browser session mein hai. Tab band karne se pehle download kar lo.")
+
+# ---------- Purana data upload ----------
+with st.expander("📂 Purana CSV upload karo"):
+    uploaded = st.file_uploader("expenses.csv chuno", type="csv")
+    if uploaded is not None and st.button("Upload karke load karo"):
+        try:
+            up = pd.read_csv(uploaded)
+            if all(c in up.columns for c in COLUMNS):
+                st.session_state.expenses = up[COLUMNS]
+                st.success("Data load ho gaya.")
+                st.rerun()
+            else:
+                st.error("CSV mein date, amount, category, note columns chahiye.")
+        except Exception:
+            st.error("File padh nahi paaye.")
+
+# ---------- Naya kharcha ----------
 text = st.text_input("What did you spend on?", placeholder="e.g. 250 on pizza with friends")
 
 if st.button("Add") and text.strip():
@@ -49,20 +65,25 @@ if st.button("Add") and text.strip():
 
     try:
         data = json.loads(reply.text)
-        df = load()
-        df.loc[len(df)] = [str(date.today()), data["amount"], data["category"], data["note"]]
-        df.to_csv(FILE, index=False)
+        new_row = pd.DataFrame(
+            [[str(date.today()), data["amount"], data["category"], data["note"]]],
+            columns=COLUMNS,
+        )
+        st.session_state.expenses = pd.concat(
+            [st.session_state.expenses, new_row], ignore_index=True
+        )
         st.success(f"Added: ₹{data['amount']} on {data['category']}")
     except (json.JSONDecodeError, KeyError):
         st.error("Couldn't understand that. Try rephrasing.")
 
-df = load()
+df = st.session_state.expenses.copy()
 if not df.empty:
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
     df = df.dropna(subset=["date", "amount"])
     df["month"] = df["date"].dt.strftime("%Y-%m")
 
+if not df.empty:
     st.metric("Total spent", f"₹{df['amount'].sum():,.0f}")
 
     months = sorted(df["month"].unique(), reverse=True)
@@ -109,9 +130,6 @@ if not df.empty:
     st.divider()
     st.subheader("🤖 AI Financial Advisor")
 
-    if "chat" not in st.session_state:
-        st.session_state.chat = []
-
     for m in st.session_state.chat:
         with st.chat_message(m["role"]):
             st.write(m["content"])
@@ -147,9 +165,10 @@ if not df.empty:
             st.write(answer)
         st.session_state.chat.append({"role": "assistant", "content": answer})
 
+    # ---------- Reset ----------
     st.divider()
-    confirm = st.checkbox("Haan, saara data hatana hai")
-    if st.button("Reset all data") and confirm:
-        FILE.unlink(missing_ok=True)
+    confirm = st.checkbox("Haan, mera saara data hatana hai")
+    if st.button("Reset my data") and confirm:
+        st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
         st.session_state.chat = []
         st.rerun()
