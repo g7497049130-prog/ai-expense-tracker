@@ -11,6 +11,7 @@ from google import genai
 
 client = genai.Client()
 FILE = Path("expenses.csv")
+MODEL = "gemini-3.8-flash"
 
 
 def load():
@@ -34,7 +35,7 @@ if st.button("Add") and text.strip():
     for attempt in range(3):
         try:
             reply = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model=MODEL,
                 contents=prompt,
                 config={"response_mime_type": "application/json"},
             )
@@ -104,8 +105,51 @@ if not df.empty:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+    # ---------- AI Financial Advisor ----------
+    st.divider()
+    st.subheader("🤖 AI Financial Advisor")
+
+    if "chat" not in st.session_state:
+        st.session_state.chat = []
+
+    for m in st.session_state.chat:
+        with st.chat_message(m["role"]):
+            st.write(m["content"])
+
+    question = st.chat_input("Poochho: main kahan zyada kharch kar raha hoon?")
+    if question:
+        st.session_state.chat.append({"role": "user", "content": question})
+        with st.chat_message("user"):
+            st.write(question)
+
+        history_csv = export_df.tail(100).to_csv(index=False)
+        advisor_prompt = (
+            "You are a friendly personal finance advisor for an Indian college student. "
+            "Use ONLY the expense data below (amounts are in rupees). "
+            "Reply in simple Hinglish, in under 150 words, with 2 to 3 practical tips. "
+            "If the data is too little to judge, say so.\n\n"
+            f"Expense data (CSV):\n{history_csv}\n\n"
+            f"Question: {question}"
+        )
+
+        answer = None
+        with st.chat_message("assistant"):
+            with st.spinner("Soch raha hoon..."):
+                for attempt in range(3):
+                    try:
+                        resp = client.models.generate_content(model=MODEL, contents=advisor_prompt)
+                        answer = resp.text
+                        break
+                    except Exception:
+                        time.sleep(2)
+            if answer is None:
+                answer = "Server busy hai, thodi der baad try karo."
+            st.write(answer)
+        st.session_state.chat.append({"role": "assistant", "content": answer})
+
     st.divider()
     confirm = st.checkbox("Haan, saara data hatana hai")
     if st.button("Reset all data") and confirm:
         FILE.unlink(missing_ok=True)
+        st.session_state.chat = []
         st.rerun()
