@@ -1,3 +1,4 @@
+import os
 import json
 import time
 from datetime import date
@@ -8,7 +9,12 @@ import plotly.express as px
 import streamlit as st
 from google import genai
 
-client = genai.Client()
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    api_key = os.environ.get("GEMINI_API_KEY")
+
+client = genai.Client(api_key=api_key)
 MODEL = "gemini-3.8-flash"
 COLUMNS = ["date", "amount", "category", "note"]
 
