@@ -12,7 +12,6 @@ client = genai.Client()
 MODEL = "gemini-3.8-flash"
 COLUMNS = ["date", "amount", "category", "note"]
 
-# Har user ka data uske session mein
 if "expenses" not in st.session_state:
     st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
 if "chat" not in st.session_state:
@@ -20,6 +19,9 @@ if "chat" not in st.session_state:
 
 st.title("💸 AI Expense Tracker")
 st.caption("Tumhara data sirf tumhare browser session mein hai. Tab band karne se pehle download kar lo.")
+
+# ---------- Sidebar: budget ----------
+budget = st.sidebar.number_input("Monthly budget (₹)", min_value=0, value=0, step=500)
 
 # ---------- Purana data upload ----------
 with st.expander("📂 Purana CSV upload karo"):
@@ -36,14 +38,17 @@ with st.expander("📂 Purana CSV upload karo"):
         except Exception:
             st.error("File padh nahi paaye.")
 
-# ---------- Naya kharcha ----------
-text = st.text_input("What did you spend on?", placeholder="e.g. 250 on pizza with friends")
+# ---------- Naya kharcha (ek ya kai) ----------
+text = st.text_input(
+    "What did you spend on?",
+    placeholder="e.g. chai 20, lunch 120, bus 30",
+)
 
 if st.button("Add") and text.strip():
     prompt = (
-        "Extract the expense from the text below. Reply with ONLY JSON like "
-        '{"amount": 250, "category": "Food", "note": "pizza with friends"}. '
-        "Categories: Food, Travel, Study, Entertainment, Shopping, Other.\n\n"
+        "Extract ALL expenses from the text below. Reply with ONLY a JSON list like "
+        '[{"amount": 250, "category": "Food", "note": "pizza"}]. '
+        "One object per expense. Categories: Food, Travel, Study, Entertainment, Shopping, Other.\n\n"
         "Text: " + text
     )
 
@@ -64,16 +69,19 @@ if st.button("Add") and text.strip():
         st.stop()
 
     try:
-        data = json.loads(reply.text)
-        new_row = pd.DataFrame(
-            [[str(date.today()), data["amount"], data["category"], data["note"]]],
-            columns=COLUMNS,
-        )
+        items = json.loads(reply.text)
+        if isinstance(items, dict):
+            items = [items]
+        rows = [
+            [str(date.today()), it["amount"], it["category"], it["note"]]
+            for it in items
+        ]
+        new_rows = pd.DataFrame(rows, columns=COLUMNS)
         st.session_state.expenses = pd.concat(
-            [st.session_state.expenses, new_row], ignore_index=True
+            [st.session_state.expenses, new_rows], ignore_index=True
         )
-        st.success(f"Added: ₹{data['amount']} on {data['category']}")
-    except (json.JSONDecodeError, KeyError):
+        st.success(f"{len(rows)} entry add hui.")
+    except (json.JSONDecodeError, KeyError, TypeError):
         st.error("Couldn't understand that. Try rephrasing.")
 
 df = st.session_state.expenses.copy()
@@ -90,6 +98,16 @@ if not df.empty:
     chosen = st.selectbox("Month chuno", months)
     month_df = df[df["month"] == chosen]
 
+    # ---------- Budget warning ----------
+    month_total = month_df["amount"].sum()
+    if budget > 0:
+        used = month_total / budget
+        st.progress(min(used, 1.0), text=f"Budget use: ₹{month_total:,.0f} / ₹{budget:,.0f}")
+        if used >= 1:
+            st.error("Budget cross ho gaya! 🚨")
+        elif used >= 0.8:
+            st.warning("Budget ka 80% se zyada kharch ho chuka hai. ⚠️")
+
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Category-wise kharch")
@@ -104,6 +122,11 @@ if not df.empty:
 
     st.subheader("Saari entries")
     st.dataframe(df.drop(columns=["month"]))
+
+    # ---------- Delete last entry ----------
+    if st.button("🗑 Last entry delete karo"):
+        st.session_state.expenses = st.session_state.expenses.iloc[:-1].reset_index(drop=True)
+        st.rerun()
 
     export_df = df.drop(columns=["month"]).copy()
     export_df["date"] = export_df["date"].dt.strftime("%Y-%m-%d")
@@ -141,11 +164,13 @@ if not df.empty:
             st.write(question)
 
         history_csv = export_df.tail(100).to_csv(index=False)
+        budget_line = f"Monthly budget: Rs {budget}.\n" if budget > 0 else ""
         advisor_prompt = (
             "You are a friendly personal finance advisor for an Indian college student. "
             "Use ONLY the expense data below (amounts are in rupees). "
             "Reply in simple Hinglish, in under 150 words, with 2 to 3 practical tips. "
             "If the data is too little to judge, say so.\n\n"
+            f"{budget_line}"
             f"Expense data (CSV):\n{history_csv}\n\n"
             f"Question: {question}"
         )
